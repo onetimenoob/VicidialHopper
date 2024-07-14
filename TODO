@@ -1,0 +1,22 @@
+Work out from vicidial_live_agents how many agents. If campaign settings says no hopper dialing is disabled
+if > 0 {
+Number of round(Active Agents * Auto Dial Level * ( 60 seconds / Dial Timeout ) * Auto Hopper Multiplier)
+
+Recycle Rules:
+Get all recycle statuses and all dial statuses and get unique statuses
+
+check if status is in recycle statuses
+Loop rules and put each status into its own () and then use OR to combine them{
+Max retry                   :called_since_reset check if in campaign dial_statuses, then add to the IN statment. Remember (Y,Y1,Y2,Y3,Y4,Y5,Y6,Y7,Y8,Y9,Y10,N)
+Time_delay                  : last_local_call_time, take NOW() - timedelay. And use in query
+Status                      :Status
+
+NB: Check if status is in campaign dial_statuses, if there and to
+
+}
+
+NB:
+Always check for callbacks even if hopper is over its limit. If there are callbacks, then we can still call them.
+}
+
+
