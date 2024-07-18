@@ -8,7 +8,7 @@ import (
 )
 
 func GetCampaignSettings(database *sql.DB, campaign_id string) (models.CampaignSettings, error) {
-	query := "SELECT lead_order,lead_filter_id,use_internal_dnc,use_campaign_dnc,dial_method,dial_timeout,dial_statuses,hopper_level,call_count_limit FROM vicidial_campaigns WHERE active='y' and campaign_id = ? and no_hopper_dialing='N' limit 1"
+	query := "SELECT lead_order,lead_filter_id,use_internal_dnc,use_campaign_dnc,dial_method,dial_timeout,dial_statuses,hopper_level,call_count_limit,lead_order_secondary,auto_dial_level FROM vicidial_campaigns WHERE active='y' and campaign_id = ? and no_hopper_dialing='N' limit 1"
 	rows, err := database.Query(query, campaign_id)
 	if err != nil {
 		log.Println(err)
@@ -19,7 +19,7 @@ func GetCampaignSettings(database *sql.DB, campaign_id string) (models.CampaignS
 	var dial_status string
 	var lead_filter_id string
 	for rows.Next() {
-		err := rows.Scan(&settings.Lead_order, &lead_filter_id, &settings.Use_internal_dnc, &settings.Use_campaign_dnc, &settings.Dial_method, &settings.Dial_timeout, &dial_status, &settings.Hopper_level, &settings.Call_count_limit)
+		err := rows.Scan(&settings.Lead_order, &lead_filter_id, &settings.Use_internal_dnc, &settings.Use_campaign_dnc, &settings.Dial_method, &settings.Dial_timeout, &dial_status, &settings.Hopper_level, &settings.Call_count_limit, &settings.Lead_order_secondary, &settings.AutoDialLevel)
 		if err != nil {
 			log.Println(err)
 			return models.CampaignSettings{}, err

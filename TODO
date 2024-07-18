@@ -19,4 +19,6 @@ NB:
 Always check for callbacks even if hopper is over its limit. If there are callbacks, then we can still call them.
 }
 
-
+Check for ANYONE Callbacks and chekc against DNC if in DNC change callback status to DEAD and vicidial_list to DNCL(System MATCH) if camapign match(DNCC) and then load to hopper if vicidial_list status CBHOLD CALLBK otherwise delete callback.
+Remove leads from hopper that the lists are not active.
+Delete for campaign in hopper with state 'DONE'
