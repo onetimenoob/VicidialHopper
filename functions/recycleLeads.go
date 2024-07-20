@@ -156,9 +156,6 @@ func RecycleLeads(campaign_settings models.CampaignSettings, campaign models.Age
 	dncNumbersCampaign.Mu.RLock()
 	defer dncNumbers.Mu.RUnlock()
 	defer dncNumbersCampaign.Mu.RUnlock()
-	println(len(dncNumbers.Numbers))
-	println(len(dncNumbersCampaign.Numbers))
-	println(FinishedSqlQueryWhere)
 	var query string
 	query = "SELECT lead_id,phone_number,list_id,vendor_lead_code FROM vicidial_list WHERE" + FinishedSqlQueryWhere + " LIMIT " + strconv.Itoa(hopperLevelNeeded)
 	rows, err := DBconn.Query(query)
@@ -248,7 +245,7 @@ func RecycleLeads(campaign_settings models.CampaignSettings, campaign models.Age
 		hopperLeads = append(hopperLeads, hopperLead{leadId: lead_id, phoneNumber: phone_number, listId: list_id, vendorLeadCode: vendor_lead_code, priority: 50})
 	}
 
-	var recycleLeadCounter int = 1
+	var recycleLeadCounter = 1
 	for i := 0; i < hopperLevelNeeded; i++ {
 		if len(recycleHopperLeads) > 0 {
 			lead := recycleHopperLeads[0]

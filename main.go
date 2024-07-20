@@ -53,15 +53,20 @@ func LoadDNCNumbers(database *sql.DB, numbers *models.DNCNumbers) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			println(err.Error())
+		}
+	}(rows)
 
 	for rows.Next() {
-		var phone_number string
-		err := rows.Scan(&phone_number)
+		var phoneNumber string
+		err := rows.Scan(&phoneNumber)
 		if err != nil {
 			log.Fatal(err)
 		}
-		numbers.Numbers[phone_number] = true
+		numbers.Numbers[phoneNumber] = true
 	}
 	println("DNC Numbers Loaded!!")
 }
@@ -77,15 +82,20 @@ func LoadDNCNumbersCampaign(database *sql.DB, numbers *models.DNCNumbersCampaign
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			println(err.Error())
+		}
+	}(rows)
 
 	for rows.Next() {
-		var phone_number string
-		err := rows.Scan(&phone_number)
+		var phoneNumber string
+		err := rows.Scan(&phoneNumber)
 		if err != nil {
 			log.Fatal(err)
 		}
-		numbers.Numbers[phone_number] = true
+		numbers.Numbers[phoneNumber] = true
 	}
 	println("DNC Numbers Loaded!!")
 }
@@ -96,7 +106,12 @@ func main() {
 	if DBconn == nil {
 		return
 	}
-	defer DBconn.Close()
+	defer func(DBconn *sql.DB) {
+		err := DBconn.Close()
+		if err != nil {
+			println(err.Error())
+		}
+	}(DBconn)
 	fmt.Println("Database connected successfully")
 
 	dncNumbers := NewDNCNumbers()
@@ -114,26 +129,25 @@ func main() {
 			dncNumbersCampaign := NewDNCNumbersCampaigns()
 			go LoadDNCNumbersCampaign(DBconn, dncNumbersCampaign, campaign.Campaign_id)
 			functions.RemoveNonValidCallbacks(campaign.Campaign_id, DBconn)
-			return
-			campaign_settings, err := functions.GetCampaignSettings(DBconn, campaign.Campaign_id)
+			campaignSettings, err := functions.GetCampaignSettings(DBconn, campaign.Campaign_id)
 			if err != nil {
 				log.Println(err)
 				log.Println("Error in getting campaign settings")
 				return
 			}
-			fmt.Println(campaign_settings)
-			if campaign_settings.Use_internal_dnc == "Y" || campaign_settings.Use_campaign_dnc == "Y" {
-				functions.CheckHopperDNC(campaign.Campaign_id, campaign_settings, dncNumbersCampaign, dncNumbers, DBconn)
+			fmt.Println(campaignSettings)
+			if campaignSettings.Use_internal_dnc == "Y" || campaignSettings.Use_campaign_dnc == "Y" {
+				functions.CheckHopperDNC(campaign.Campaign_id, campaignSettings, dncNumbersCampaign, dncNumbers, DBconn)
 			}
 			hopperCurrentCount := functions.GetCampaignHopperCount(campaign.Campaign_id, DBconn)
 
 			var calcHopperLevel float32
 			var hopperLevelNeeded int
-			if campaign_settings.Dial_method == "RATIO" {
+			if campaignSettings.Dial_method == "RATIO" {
 				println("Ratio Dialing")
-				calcHopperLevel = float32(campaign.Agent_count) * float32(campaign_settings.AutoDialLevel) * (60.0 / float32(campaign_settings.Dial_timeout))
+				calcHopperLevel = float32(campaign.Agent_count) * float32(campaignSettings.AutoDialLevel) * (60.0 / float32(campaignSettings.Dial_timeout))
 			} else {
-				calcHopperLevel = float32(campaign.Agent_count) * 1 * (60.0 / float32(campaign_settings.Dial_timeout))
+				calcHopperLevel = float32(campaign.Agent_count) * 1 * (60.0 / float32(campaignSettings.Dial_timeout))
 				println("Predictive Dialing")
 			}
 			println(calcHopperLevel)
@@ -144,7 +158,7 @@ func main() {
 			if hopperCurrentCount < hopperLevelNeeded {
 				// Wait for DNC numbers to be loaded before proceeding
 
-				functions.RecycleLeads(campaign_settings, campaign, DBconn, hopperLevelNeeded, dncNumbers, dncNumbersCampaign)
+				functions.RecycleLeads(campaignSettings, campaign, DBconn, hopperLevelNeeded, dncNumbers, dncNumbersCampaign)
 			}
 			println("Done")
 		}(campaign)
