@@ -5,19 +5,24 @@ import (
 	"strings"
 )
 
-func GetCallbackStatuses(campaign_id string, DBConn *sql.DB) string {
+func GetCallbackStatuses(campaignId string, DBConn *sql.DB) string {
 	var statuses []string
 	//add 'CBHOLD' and 'CALLBK' to the statuses
 	statuses = append(statuses, "'CBHOLD'")
 	statuses = append(statuses, "'CALLBK'")
 
 	query := "SELECT status FROM vicidial_campaign_statuses where campaign_id = ? and scheduled_callback='Y' union SELECT status FROM vicidial_statuses where scheduled_callback='Y'"
-	rows, err := DBConn.Query(query, campaign_id)
+	rows, err := DBConn.Query(query, campaignId)
 	if err != nil {
 		println(err)
 		return "dhdfhdfhdfghdfgh"
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			println(err.Error())
+		}
+	}(rows)
 	for rows.Next() {
 		var status string
 		err := rows.Scan(&status)

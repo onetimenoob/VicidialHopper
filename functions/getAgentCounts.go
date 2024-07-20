@@ -7,7 +7,7 @@ import (
 	"log"
 )
 
-func GetAgentCounts(database *sql.DB) []models.Agent_count {
+func GetAgentCounts(database *sql.DB) []models.AgentCount {
 	// create a new instance of Agent_count and return it with values
 	//return []models.Agent_count{{Campaign_id: "VODAFUN2", Agent_count: 210}}
 
@@ -15,19 +15,24 @@ func GetAgentCounts(database *sql.DB) []models.Agent_count {
 	rows, err := database.Query(query)
 	if err != nil {
 		log.Println(err)
-		return []models.Agent_count{}
+		return []models.AgentCount{}
 	}
-	defer rows.Close()
-	var agents []models.Agent_count
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			println(err.Error())
+		}
+	}(rows)
+	var agents []models.AgentCount
 	for rows.Next() {
-		var agent models.Agent_count
-		err := rows.Scan(&agent.Campaign_id, &agent.Agent_count)
+		var agent models.AgentCount
+		err := rows.Scan(&agent.CampaignId, &agent.AgentCount)
 		if err != nil {
 			log.Println(err)
-			return []models.Agent_count{}
+			return []models.AgentCount{}
 
 		}
-		fmt.Println(agent.Campaign_id, agent.Agent_count)
+		fmt.Println(agent.CampaignId, agent.AgentCount)
 		agents = append(agents, agent)
 	}
 	return agents

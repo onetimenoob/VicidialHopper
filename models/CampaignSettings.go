@@ -3,28 +3,28 @@ package models
 import "sync"
 
 type CampaignSettings struct {
-	Lead_order           string
-	Lead_filter_id       string
-	Use_internal_dnc     string
-	Use_campaign_dnc     string
-	Dial_method          string
-	Dial_timeout         int
-	Dial_statuses        []string
-	Hopper_level         int
-	Call_count_limit     int
-	Lead_order_secondary string
-	AutoDialLevel        int
+	LeadOrder          string
+	LeadFilterId       string
+	UseInternalDnc     string
+	UseCampaignDnc     string
+	DialMethod         string
+	DialTimeout        int
+	DialStatuses       []string
+	HopperLevel        int
+	CallCountLimit     int
+	LeadOrderSecondary string
+	AutoDialLevel      int
 }
 
-type Lead_recycle_rule struct {
-	Status        string
-	Attempt_delay int
-	Max_attempts  int
+type LeadRecycleRule struct {
+	Status       string
+	AttemptDelay int
+	MaxAttempts  int
 }
 
-type Agent_count struct {
-	Campaign_id string
-	Agent_count int
+type AgentCount struct {
+	CampaignId string
+	AgentCount int
 }
 
 type DNCNumbers struct {

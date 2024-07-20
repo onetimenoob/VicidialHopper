@@ -71,14 +71,14 @@ func LoadDNCNumbers(database *sql.DB, numbers *models.DNCNumbers) {
 	println("DNC Numbers Loaded!!")
 }
 
-func LoadDNCNumbersCampaign(database *sql.DB, numbers *models.DNCNumbersCampaign, campaign_id string) {
+func LoadDNCNumbersCampaign(database *sql.DB, numbers *models.DNCNumbersCampaign, campaignId string) {
 	defer numbers.Loaded.Done()
 
 	numbers.Mu.Lock()
 	defer numbers.Mu.Unlock()
 
 	query := "SELECT phone_number FROM vicidial_campaign_dnc where campaign_id = ?"
-	rows, err := database.Query(query, campaign_id)
+	rows, err := database.Query(query, campaignId)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -122,32 +122,32 @@ func main() {
 	// Remove Duplicate callbacks only keep latest 1
 	functions.RemoveDuplicateCallbacks(DBconn)
 	for _, campaign := range campaigns {
-		println("Campaign ID: ", campaign.Campaign_id)
+		println("Campaign ID: ", campaign.CampaignId)
 		wg.Add(1)
-		go func(campaign models.Agent_count) {
+		go func(campaign models.AgentCount) {
 			defer wg.Done()
 			dncNumbersCampaign := NewDNCNumbersCampaigns()
-			go LoadDNCNumbersCampaign(DBconn, dncNumbersCampaign, campaign.Campaign_id)
-			functions.RemoveNonValidCallbacks(campaign.Campaign_id, DBconn)
-			campaignSettings, err := functions.GetCampaignSettings(DBconn, campaign.Campaign_id)
+			go LoadDNCNumbersCampaign(DBconn, dncNumbersCampaign, campaign.CampaignId)
+			functions.RemoveNonValidCallbacks(campaign.CampaignId, DBconn)
+			campaignSettings, err := functions.GetCampaignSettings(DBconn, campaign.CampaignId)
 			if err != nil {
 				log.Println(err)
 				log.Println("Error in getting campaign settings")
 				return
 			}
 			fmt.Println(campaignSettings)
-			if campaignSettings.Use_internal_dnc == "Y" || campaignSettings.Use_campaign_dnc == "Y" {
-				functions.CheckHopperDNC(campaign.Campaign_id, campaignSettings, dncNumbersCampaign, dncNumbers, DBconn)
+			if campaignSettings.UseInternalDnc == "Y" || campaignSettings.UseCampaignDnc == "Y" {
+				functions.CheckHopperDNC(campaign.CampaignId, campaignSettings, dncNumbersCampaign, dncNumbers, DBconn)
 			}
-			hopperCurrentCount := functions.GetCampaignHopperCount(campaign.Campaign_id, DBconn)
+			hopperCurrentCount := functions.GetCampaignHopperCount(campaign.CampaignId, DBconn)
 
 			var calcHopperLevel float32
 			var hopperLevelNeeded int
-			if campaignSettings.Dial_method == "RATIO" {
+			if campaignSettings.DialMethod == "RATIO" {
 				println("Ratio Dialing")
-				calcHopperLevel = float32(campaign.Agent_count) * float32(campaignSettings.AutoDialLevel) * (60.0 / float32(campaignSettings.Dial_timeout))
+				calcHopperLevel = float32(campaign.AgentCount) * float32(campaignSettings.AutoDialLevel) * (60.0 / float32(campaignSettings.DialTimeout))
 			} else {
-				calcHopperLevel = float32(campaign.Agent_count) * 1 * (60.0 / float32(campaignSettings.Dial_timeout))
+				calcHopperLevel = float32(campaign.AgentCount) * 1 * (60.0 / float32(campaignSettings.DialTimeout))
 				println("Predictive Dialing")
 			}
 			println(calcHopperLevel)

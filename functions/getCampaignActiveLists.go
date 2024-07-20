@@ -5,14 +5,19 @@ import (
 	"log"
 )
 
-func getCampaignActiveLists(database *sql.DB, campaign_id string) []string {
+func getCampaignActiveLists(database *sql.DB, campaignId string) []string {
 	query := "SELECT list_id FROM vicidial_lists WHERE campaign_id = ? and active='Y' and expiration_date > NOW()"
-	rows, err := database.Query(query, campaign_id)
+	rows, err := database.Query(query, campaignId)
 	if err != nil {
 		log.Println(err)
 		return []string{}
 	}
-	defer rows.Close()
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			println(err.Error())
+		}
+	}(rows)
 	var lists []string
 	for rows.Next() {
 		var list string

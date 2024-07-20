@@ -16,29 +16,29 @@ type hopperLead struct {
 	priority       int
 }
 
-func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.Agent_count, DBconn *sql.DB, hopperLevelNeeded int, dncNumbers *models.DNCNumbers, dncNumbersCampaign *models.DNCNumbersCampaign) {
+func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.AgentCount, DBconn *sql.DB, hopperLevelNeeded int, dncNumbers *models.DNCNumbers, dncNumbersCampaign *models.DNCNumbersCampaign) {
 
-	campaignActiveLists := getCampaignActiveLists(DBconn, campaign.Campaign_id)
+	campaignActiveLists := getCampaignActiveLists(DBconn, campaign.CampaignId)
 	if len(campaignActiveLists) == 0 {
 		println("No active lists")
 		return
 	}
-	var recycleRules []models.Lead_recycle_rule
+	var recycleRules []models.LeadRecycleRule
 	fmt.Println("Need to add leads to hopper")
-	recycleRules = getRecycleRules(DBconn, campaign.Campaign_id)
+	recycleRules = getRecycleRules(DBconn, campaign.CampaignId)
 	fmt.Println(recycleRules)
 
 	var newCount int
 	switch {
-	case strings.HasSuffix(campaignSettings.Lead_order, " 2nd NEW"):
+	case strings.HasSuffix(campaignSettings.LeadOrder, " 2nd NEW"):
 		newCount = 2
-	case strings.HasSuffix(campaignSettings.Lead_order, " 3rd NEW"):
+	case strings.HasSuffix(campaignSettings.LeadOrder, " 3rd NEW"):
 		newCount = 3
-	case strings.HasSuffix(campaignSettings.Lead_order, " 4th NEW"):
+	case strings.HasSuffix(campaignSettings.LeadOrder, " 4th NEW"):
 		newCount = 4
-	case strings.HasSuffix(campaignSettings.Lead_order, " 5th NEW"):
+	case strings.HasSuffix(campaignSettings.LeadOrder, " 5th NEW"):
 		newCount = 5
-	case strings.HasSuffix(campaignSettings.Lead_order, " 6th NEW"):
+	case strings.HasSuffix(campaignSettings.LeadOrder, " 6th NEW"):
 		newCount = 6
 	}
 
@@ -49,21 +49,21 @@ func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.Agen
 			continue
 		}
 		inDialStatus := false
-		for i, status := range campaignSettings.Dial_statuses {
+		for i, status := range campaignSettings.DialStatuses {
 			if status == rule.Status {
 				inDialStatus = true
 				//remove the dial status from the list
-				campaignSettings.Dial_statuses = append(campaignSettings.Dial_statuses[:i], campaignSettings.Dial_statuses[i+1:]...)
+				campaignSettings.DialStatuses = append(campaignSettings.DialStatuses[:i], campaignSettings.DialStatuses[i+1:]...)
 				break
 			}
 		}
 		var lastCalledArray []string
-		for attempts := 1; attempts <= rule.Max_attempts; attempts++ {
+		for attempts := 1; attempts <= rule.MaxAttempts; attempts++ {
 			lastCalledArray = append(lastCalledArray, "'Y"+fmt.Sprintf("%d'", attempts))
 		}
 		lastCalledString := strings.Join(lastCalledArray, ",")
 
-		sqlQueryWhere := fmt.Sprintf(("last_local_call_time < DATE_SUB(NOW(), INTERVAL %d SECOND) and called_since_last_reset IN(%s)"), rule.Attempt_delay, lastCalledString)
+		sqlQueryWhere := fmt.Sprintf(("last_local_call_time < DATE_SUB(NOW(), INTERVAL %d SECOND) and called_since_last_reset IN(%s)"), rule.AttemptDelay, lastCalledString)
 		if FinishedSqlQueryWhere != "" {
 			FinishedSqlQueryWhere = FinishedSqlQueryWhere + " OR "
 		}
@@ -74,7 +74,7 @@ func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.Agen
 		}
 
 	}
-	for _, status := range campaignSettings.Dial_statuses {
+	for _, status := range campaignSettings.DialStatuses {
 		if newCount > 0 && status == "NEW" {
 			println("New count is greater than 0 and status is NEW so skipping")
 			continue
@@ -86,57 +86,57 @@ func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.Agen
 	}
 
 	FinishedSqlQueryWhere = "(" + FinishedSqlQueryWhere + ")"
-	if campaignSettings.Call_count_limit > 0 {
-		FinishedSqlQueryWhere = FinishedSqlQueryWhere + " AND called_count < " + strconv.Itoa(campaignSettings.Call_count_limit)
+	if campaignSettings.CallCountLimit > 0 {
+		FinishedSqlQueryWhere = FinishedSqlQueryWhere + " AND called_count < " + strconv.Itoa(campaignSettings.CallCountLimit)
 	}
 	activeListsString := strings.Join(campaignActiveLists, ",")
 	FinishedSqlQueryWhere = FinishedSqlQueryWhere + " AND list_id IN(" + activeListsString + ")"
 
-	if campaignSettings.Lead_filter_id != "" {
-		FinishedSqlQueryWhere = FinishedSqlQueryWhere + " AND " + campaignSettings.Lead_filter_id + " AND lead_id NOT IN (SELECT lead_id FROM vicidial_hopper)"
+	if campaignSettings.LeadFilterId != "" {
+		FinishedSqlQueryWhere = FinishedSqlQueryWhere + " AND " + campaignSettings.LeadFilterId + " AND lead_id NOT IN (SELECT lead_id FROM vicidial_hopper)"
 	}
 
 	var orderStmt string
 	switch {
-	case strings.HasPrefix(campaignSettings.Lead_order, "UP LAST NAME"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "UP LAST NAME"):
 		orderStmt = "order by last_name desc, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "DOWN LAST NAME"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "DOWN LAST NAME"):
 		orderStmt = "order by last_name, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "UP PHONE"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "UP PHONE"):
 		orderStmt = "order by phone_number desc, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "DOWN PHONE"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "DOWN PHONE"):
 		orderStmt = "order by phone_number, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "UP COUNT"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "UP COUNT"):
 		orderStmt = "order by called_count desc, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "DOWN COUNT"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "DOWN COUNT"):
 		orderStmt = "order by called_count, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "UP LAST CALL TIME"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "UP LAST CALL TIME"):
 		orderStmt = "order by last_local_call_time desc, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "DOWN LAST CALL TIME"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "DOWN LAST CALL TIME"):
 		orderStmt = "order by last_local_call_time, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "UP RANK"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "UP RANK"):
 		orderStmt = "order by rank desc, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "DOWN RANK"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "DOWN RANK"):
 		orderStmt = "order by rank, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "UP OWNER"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "UP OWNER"):
 		orderStmt = "order by owner desc, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "DOWN OWNER"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "DOWN OWNER"):
 		orderStmt = "order by owner, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "UP TIMEZONE"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "UP TIMEZONE"):
 		orderStmt = "order by gmt_offset_now desc, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "DOWN TIMEZONE"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "DOWN TIMEZONE"):
 		orderStmt = "order by gmt_offset_now, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "RANDOM"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "RANDOM"):
 		orderStmt = "order by RAND(), "
-	case strings.HasPrefix(campaignSettings.Lead_order, "UP"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "UP"):
 		orderStmt = "order by lead_id desc, "
-	case strings.HasPrefix(campaignSettings.Lead_order, "DOWN"):
+	case strings.HasPrefix(campaignSettings.LeadOrder, "DOWN"):
 		orderStmt = "order by lead_id asc, "
 	}
 
 	println(newCount)
 	var secondaryOrderStmt string
-	switch campaignSettings.Lead_order_secondary {
+	switch campaignSettings.LeadOrderSecondary {
 	case "LEAD_ASCEND":
 		secondaryOrderStmt = "lead_id asc"
 	case "LEAD_DESCEND":
@@ -234,7 +234,7 @@ func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.Agen
 
 	var hopperLeads []hopperLead
 	//load callbacks first
-	callbackStatuses := GetCallbackStatuses(campaign.Campaign_id, DBconn)
+	callbackStatuses := GetCallbackStatuses(campaign.CampaignId, DBconn)
 	query = "SELECT vicidial_list.lead_id,phone_number,vicidial_list.list_id,vendor_lead_code FROM vicidial_callbacks INNER JOIN  vicidial_list ON (vicidial_callbacks.lead_id=vicidial_list.lead_id) WHERE recipient='ANYONE' AND callback_time<NOW() AND vicidial_list.list_id IN(" + activeListsString + ") AND vicidial_list.lead_id NOT IN (SELECT lead_id FROM vicidial_hopper) and vicidial_list.status IN(" + callbackStatuses + ")"
 	rows, err = DBconn.Query(query)
 	if err != nil {
@@ -286,7 +286,7 @@ func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.Agen
 	}
 	for _, lead := range hopperLeads {
 		query := "INSERT INTO vicidial_hopper (lead_id, campaign_id, status, list_id, vendor_lead_code, priority) VALUES(?,?,?,?,?,?)"
-		_, err := DBconn.Exec(query, lead.leadId, campaign.Campaign_id, "READY", lead.listId, lead.vendorLeadCode, lead.priority)
+		_, err := DBconn.Exec(query, lead.leadId, campaign.CampaignId, "READY", lead.listId, lead.vendorLeadCode, lead.priority)
 		if err != nil {
 			println(err)
 		}
