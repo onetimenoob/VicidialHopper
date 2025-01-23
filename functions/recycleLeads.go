@@ -14,19 +14,20 @@ type hopperLead struct {
 	listId         string
 	vendorLeadCode string
 	priority       int
+	source         string
 }
 
 func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.AgentCount, DBconn *sql.DB, hopperLevelNeeded int, dncNumbers *models.DNCNumbers, dncNumbersCampaign *models.DNCNumbersCampaign) {
 
 	campaignActiveLists := getCampaignActiveLists(DBconn, campaign.CampaignId)
+
 	if len(campaignActiveLists) == 0 {
 		println("No active lists")
 		return
 	}
 	var recycleRules []models.LeadRecycleRule
-	fmt.Println("Need to add leads to hopper")
+
 	recycleRules = getRecycleRules(DBconn, campaign.CampaignId)
-	fmt.Println(recycleRules)
 
 	var newCount int
 	switch {
@@ -42,7 +43,117 @@ func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.Agen
 		newCount = 6
 	}
 
-	FinishedSqlQueryWhere := ""
+	var FinishedSqlQueryWhere string
+	FinishedSqlQueryWhere, activeListsString := recycleRuleBuilder(campaignSettings, recycleRules, newCount, FinishedSqlQueryWhere, campaignActiveLists)
+
+	orderStmt := getSortParams(campaignSettings)
+
+	println(newCount)
+
+	FinishedSqlQueryWhere = FinishedSqlQueryWhere + " " + orderStmt
+
+	// Wait for DNC numbers to be loaded before proceeding
+	dncNumbers.Mu.RLock()
+	dncNumbersCampaign.Mu.RLock()
+	defer dncNumbers.Mu.RUnlock()
+	defer dncNumbersCampaign.Mu.RUnlock()
+
+	//get Recycled Leads
+	var recycleHopperLeads []hopperLead
+	recycleHopperLeads, done := getRecycleLeads(dncNumbers, dncNumbersCampaign, DBconn, recycleHopperLeads, FinishedSqlQueryWhere, hopperLevelNeeded)
+	if done {
+		return
+	}
+
+	//get New Leads
+	var newLeadHopper []hopperLead
+	newLeadHopper, done2 := getNewLeads(campaignSettings, newCount, activeListsString, orderStmt, hopperLevelNeeded, DBconn, newLeadHopper)
+	if done2 {
+		return
+	}
+
+	//build list with recycled and new leads
+	var hopperLeads []hopperLead
+	hopperLeads = buildPreHopperLoadList(hopperLevelNeeded, recycleHopperLeads, hopperLeads, newCount, newLeadHopper)
+
+	//load leads into vicidial hopper
+	loadLeadsIntoHopper(hopperLeads, DBconn, campaign)
+}
+
+func loadLeadsIntoHopper(hopperLeads []hopperLead, DBconn *sql.DB, campaign models.AgentCount) {
+	for _, lead := range hopperLeads {
+		query := "INSERT INTO vicidial_hopper (lead_id, campaign_id, status, list_id, vendor_lead_code, priority,source) VALUES(?,?,?,?,?,?,?)"
+		_, err := DBconn.Exec(query, lead.leadId, campaign.CampaignId, "READY", lead.listId, lead.vendorLeadCode, lead.priority, lead.source)
+		if err != nil {
+			println(err)
+		}
+	}
+}
+
+func buildPreHopperLoadList(hopperLevelNeeded int, recycleHopperLeads []hopperLead, hopperLeads []hopperLead, newCount int, newLeadHopper []hopperLead) []hopperLead {
+	var recycleLeadCounter = 1
+	for i := 0; i < hopperLevelNeeded; i++ {
+		if len(recycleHopperLeads) > 0 {
+			lead := recycleHopperLeads[0]
+			recycleHopperLeads = recycleHopperLeads[1:]
+			hopperLeads = append(hopperLeads, lead)
+			fmt.Printf("Adding Recycled lead %s to hopper\n", lead.leadId)
+			recycleLeadCounter++
+		}
+
+		if (recycleLeadCounter == newCount && newCount > 0) || (len(recycleHopperLeads) == 0 && newCount > 0) {
+			recycleLeadCounter = 1
+			if len(newLeadHopper) > 0 {
+				lead := newLeadHopper[0]
+				newLeadHopper = newLeadHopper[1:]
+				hopperLeads = append(hopperLeads, lead)
+				fmt.Printf("Adding New lead %s to hopper\n", lead.leadId)
+				i++
+			}
+		}
+		if (len(recycleHopperLeads) == 0 && len(newLeadHopper) == 0) || len(hopperLeads) >= hopperLevelNeeded {
+			break
+		}
+	}
+	return hopperLeads
+}
+
+func getNewLeads(campaignSettings models.CampaignSettings, newCount int, activeListsString string, orderStmt string, hopperLevelNeeded int, DBconn *sql.DB, newLeadHopper []hopperLead) ([]hopperLead, bool) {
+	var query string
+	if newCount > 0 {
+		if campaignSettings.LeadFilterId != "" {
+			query = "SELECT lead_id,phone_number,list_id,vendor_lead_code FROM vicidial_list WHERE status = 'NEW' AND list_id IN(" + activeListsString + ") AND lead_id NOT IN (SELECT lead_id FROM vicidial_hopper)" + " AND " + campaignSettings.LeadFilterId + " " + orderStmt + " LIMIT " + strconv.Itoa(hopperLevelNeeded)
+		} else {
+			query = "SELECT lead_id,phone_number,list_id,vendor_lead_code FROM vicidial_list WHERE status = 'NEW' AND list_id IN(" + activeListsString + ") AND lead_id NOT IN (SELECT lead_id FROM vicidial_hopper)" + " " + orderStmt + " LIMIT " + strconv.Itoa(hopperLevelNeeded)
+		}
+		rows, err := DBconn.Query(query)
+		if err != nil {
+			println(err)
+			return nil, true
+		}
+		defer func(rows *sql.Rows) {
+			err := rows.Close()
+			if err != nil {
+				println(err.Error())
+			}
+		}(rows)
+		for rows.Next() {
+			var leadId string
+			var phoneNumber string
+			var listId string
+			var vendorLeadCode string
+			err := rows.Scan(&leadId, &phoneNumber, &listId, &vendorLeadCode)
+			if err != nil {
+				println(err)
+				return nil, true
+			}
+			newLeadHopper = append(newLeadHopper, hopperLead{leadId: leadId, phoneNumber: phoneNumber, listId: listId, vendorLeadCode: vendorLeadCode, priority: 0, source: "R"})
+		}
+	}
+	return newLeadHopper, false
+}
+
+func recycleRuleBuilder(campaignSettings models.CampaignSettings, recycleRules []models.LeadRecycleRule, newCount int, FinishedSqlQueryWhere string, campaignActiveLists []string) (string, string) {
 	for _, rule := range recycleRules {
 		if newCount > 0 && rule.Status == "NEW" {
 			println("New count is greater than 0 and rule status is NEW so skipping")
@@ -58,8 +169,12 @@ func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.Agen
 			}
 		}
 		var lastCalledArray []string
-		for attempts := 1; attempts <= rule.MaxAttempts; attempts++ {
-			lastCalledArray = append(lastCalledArray, "'Y"+fmt.Sprintf("%d'", attempts))
+		for attempts := 0; attempts <= rule.MaxAttempts; attempts++ {
+			if attempts == 0 {
+				lastCalledArray = append(lastCalledArray, "'Y'")
+			} else {
+				lastCalledArray = append(lastCalledArray, "'Y"+fmt.Sprintf("%d'", attempts))
+			}
 		}
 		lastCalledString := strings.Join(lastCalledArray, ",")
 
@@ -93,10 +208,67 @@ func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.Agen
 	FinishedSqlQueryWhere = FinishedSqlQueryWhere + " AND list_id IN(" + activeListsString + ")"
 
 	if campaignSettings.LeadFilterId != "" {
-		FinishedSqlQueryWhere = FinishedSqlQueryWhere + " AND " + campaignSettings.LeadFilterId + " AND lead_id NOT IN (SELECT lead_id FROM vicidial_hopper)"
+		FinishedSqlQueryWhere = FinishedSqlQueryWhere + " AND " + campaignSettings.LeadFilterId
 	}
+	FinishedSqlQueryWhere = FinishedSqlQueryWhere + " AND lead_id NOT IN (SELECT lead_id FROM vicidial_hopper)"
+	return FinishedSqlQueryWhere, activeListsString
+}
 
-	var orderStmt string
+func getRecycleLeads(dncNumbers *models.DNCNumbers, dncNumbersCampaign *models.DNCNumbersCampaign, DBconn *sql.DB, recycleHopperLeads []hopperLead, FinishedSqlQueryWhere string, hopperLevelNeeded int) ([]hopperLead, bool) {
+	var query string
+	query = "SELECT lead_id,phone_number,list_id,vendor_lead_code FROM vicidial_list WHERE" + FinishedSqlQueryWhere + " LIMIT " + strconv.Itoa(hopperLevelNeeded)
+	println(query)
+	rows, err := DBconn.Query(query)
+	if err != nil {
+		println(err)
+		return nil, true
+	}
+	defer func(rows *sql.Rows) {
+		err := rows.Close()
+		if err != nil {
+			println(err.Error())
+		}
+	}(rows)
+
+	for rows.Next() {
+		var leadId string
+		var phoneNumber string
+		var listId string
+		var vendorLeadCode string
+		var doNotLoadLead bool
+		var dncStatus string
+		err := rows.Scan(&leadId, &phoneNumber, &listId, &vendorLeadCode)
+		if err != nil {
+			println(err)
+			return nil, true
+		}
+		// Check if the number is in DNC
+		if dncNumbers.Numbers[phoneNumber] {
+			println("Number is in DNC")
+			dncStatus = "DNCL"
+			doNotLoadLead = true
+		}
+		if dncNumbersCampaign.Numbers[phoneNumber] {
+			println("Number is in campaign DNC")
+			dncStatus = "DNCC"
+			doNotLoadLead = true
+		}
+		// Add lead to hopper
+		if doNotLoadLead {
+			query := "update vicidial_list set status = ? where lead_id = ?"
+			_, err := DBconn.Exec(query, dncStatus, leadId)
+			if err != nil {
+				println(err)
+			}
+		} else {
+			recycleHopperLeads = append(recycleHopperLeads, hopperLead{leadId: leadId, phoneNumber: phoneNumber, listId: listId, vendorLeadCode: vendorLeadCode, priority: 0, source: "R"})
+		}
+	}
+	return recycleHopperLeads, false
+}
+
+func getSortParams(campaignSettings models.CampaignSettings) string {
+	var orderStmt, secondaryOrderStmt string
 	switch {
 	case strings.HasPrefix(campaignSettings.LeadOrder, "UP LAST NAME"):
 		orderStmt = "order by last_name desc, "
@@ -133,9 +305,6 @@ func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.Agen
 	case strings.HasPrefix(campaignSettings.LeadOrder, "DOWN"):
 		orderStmt = "order by lead_id asc, "
 	}
-
-	println(newCount)
-	var secondaryOrderStmt string
 	switch campaignSettings.LeadOrderSecondary {
 	case "LEAD_ASCEND":
 		secondaryOrderStmt = "lead_id asc"
@@ -149,146 +318,5 @@ func RecycleLeads(campaignSettings models.CampaignSettings, campaign models.Agen
 		secondaryOrderStmt = ""
 	}
 
-	FinishedSqlQueryWhere = FinishedSqlQueryWhere + " " + orderStmt + secondaryOrderStmt
-
-	// Wait for DNC numbers to be loaded before proceeding
-	dncNumbers.Mu.RLock()
-	dncNumbersCampaign.Mu.RLock()
-	defer dncNumbers.Mu.RUnlock()
-	defer dncNumbersCampaign.Mu.RUnlock()
-	var query string
-	query = "SELECT lead_id,phone_number,list_id,vendor_lead_code FROM vicidial_list WHERE" + FinishedSqlQueryWhere + " LIMIT " + strconv.Itoa(hopperLevelNeeded)
-	rows, err := DBconn.Query(query)
-	if err != nil {
-		println(err)
-		return
-	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-			println(err.Error())
-		}
-	}(rows)
-	var recycleHopperLeads []hopperLead
-	for rows.Next() {
-		var leadId string
-		var phoneNumber string
-		var listId string
-		var vendorLeadCode string
-		var doNotLoadLead bool
-		var dncStatus string
-		err := rows.Scan(&leadId, &phoneNumber, &listId, &vendorLeadCode)
-		if err != nil {
-			println(err)
-			return
-		}
-		// Check if the number is in DNC
-		if dncNumbers.Numbers[phoneNumber] {
-			println("Number is in DNC")
-			dncStatus = "DNCL"
-			doNotLoadLead = true
-		}
-		if dncNumbersCampaign.Numbers[phoneNumber] {
-			println("Number is in campaign DNC")
-			dncStatus = "DNCC"
-			doNotLoadLead = true
-		}
-		// Add lead to hopper
-		if doNotLoadLead {
-			query := "update vicidial_list set status = ? where lead_id = ?"
-			_, err := DBconn.Exec(query, dncStatus, leadId)
-			if err != nil {
-				println(err)
-			}
-		} else {
-			recycleHopperLeads = append(recycleHopperLeads, hopperLead{leadId: leadId, phoneNumber: phoneNumber, listId: listId, vendorLeadCode: vendorLeadCode, priority: 0})
-		}
-	}
-	var newLeadHopper []hopperLead
-	if newCount > 0 {
-		query = "SELECT lead_id,phone_number,list_id,vendor_lead_code FROM vicidial_list WHERE status = 'NEW' AND list_id IN(" + activeListsString + ") AND lead_id NOT IN (SELECT lead_id FROM vicidial_hopper)" + " " + orderStmt + secondaryOrderStmt + " LIMIT " + strconv.Itoa(hopperLevelNeeded)
-		rows, err := DBconn.Query(query)
-		if err != nil {
-			println(err)
-			return
-		}
-		defer func(rows *sql.Rows) {
-			err := rows.Close()
-			if err != nil {
-				println(err.Error())
-			}
-		}(rows)
-		for rows.Next() {
-			var leadId string
-			var phoneNumber string
-			var listId string
-			var vendorLeadCode string
-			err := rows.Scan(&leadId, &phoneNumber, &listId, &vendorLeadCode)
-			if err != nil {
-				println(err)
-				return
-			}
-			newLeadHopper = append(newLeadHopper, hopperLead{leadId: leadId, phoneNumber: phoneNumber, listId: listId, vendorLeadCode: vendorLeadCode, priority: 0})
-		}
-	}
-
-	var hopperLeads []hopperLead
-	//load callbacks first
-	callbackStatuses := GetCallbackStatuses(campaign.CampaignId, DBconn)
-	query = "SELECT vicidial_list.lead_id,phone_number,vicidial_list.list_id,vendor_lead_code FROM vicidial_callbacks INNER JOIN  vicidial_list ON (vicidial_callbacks.lead_id=vicidial_list.lead_id) WHERE recipient='ANYONE' AND callback_time<NOW() AND vicidial_list.list_id IN(" + activeListsString + ") AND vicidial_list.lead_id NOT IN (SELECT lead_id FROM vicidial_hopper) and vicidial_list.status IN(" + callbackStatuses + ")"
-	rows, err = DBconn.Query(query)
-	if err != nil {
-		println(err)
-	}
-	defer func(rows *sql.Rows) {
-		err := rows.Close()
-		if err != nil {
-			println(err.Error())
-		}
-	}(rows)
-	for rows.Next() {
-		var leadId string
-		var phoneNumber string
-		var listId string
-		var vendorLeadCode string
-		err := rows.Scan(&leadId, &phoneNumber, &listId, &vendorLeadCode)
-		if err != nil {
-			println(err)
-			return
-		}
-		fmt.Printf("Adding Callback lead %s to hopper\n", leadId)
-		hopperLeads = append(hopperLeads, hopperLead{leadId: leadId, phoneNumber: phoneNumber, listId: listId, vendorLeadCode: vendorLeadCode, priority: 50})
-	}
-
-	var recycleLeadCounter = 1
-	for i := 0; i < hopperLevelNeeded; i++ {
-		if len(recycleHopperLeads) > 0 {
-			lead := recycleHopperLeads[0]
-			recycleHopperLeads = recycleHopperLeads[1:]
-			hopperLeads = append(hopperLeads, lead)
-			fmt.Printf("Adding Recycled lead %s to hopper\n", lead.leadId)
-			recycleLeadCounter++
-		}
-
-		if (recycleLeadCounter == newCount && newCount > 0) || (len(recycleHopperLeads) == 0 && newCount > 0) {
-			recycleLeadCounter = 1
-			if len(newLeadHopper) > 0 {
-				lead := newLeadHopper[0]
-				newLeadHopper = newLeadHopper[1:]
-				hopperLeads = append(hopperLeads, lead)
-				fmt.Printf("Adding New lead %s to hopper\n", lead.leadId)
-				i++
-			}
-		}
-		if (len(recycleHopperLeads) == 0 && len(newLeadHopper) == 0) || len(hopperLeads) >= hopperLevelNeeded {
-			break
-		}
-	}
-	for _, lead := range hopperLeads {
-		query := "INSERT INTO vicidial_hopper (lead_id, campaign_id, status, list_id, vendor_lead_code, priority) VALUES(?,?,?,?,?,?)"
-		_, err := DBconn.Exec(query, lead.leadId, campaign.CampaignId, "READY", lead.listId, lead.vendorLeadCode, lead.priority)
-		if err != nil {
-			println(err)
-		}
-	}
+	return orderStmt + " " + secondaryOrderStmt
 }

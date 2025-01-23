@@ -3,12 +3,13 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	_ "github.com/go-sql-driver/mysql"
-	"github.com/onetimenoob/VicidialHopper/functions"
-	"github.com/onetimenoob/VicidialHopper/models"
 	"log"
 	"sync"
 	"time"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/onetimenoob/VicidialHopper/functions"
+	"github.com/onetimenoob/VicidialHopper/models"
 )
 
 func NewDNCNumbers() *models.DNCNumbers {
@@ -29,7 +30,8 @@ func NewDNCNumbersCampaigns() *models.DNCNumbersCampaign {
 
 func makeDBConnection() *sql.DB {
 	// Database connection parameters
-	dsn := "cron:1234@tcp(10.0.0.92:3306)/asterisk?parseTime=true"
+	//dsn := "cron:1234@tcp(10.0.0.92:3306)/asterisk?parseTime=true"
+	dsn := "cron:1234@tcp(10.20.30.40:3306)/asterisk?parseTime=true"
 	DB, err := sql.Open("mysql", dsn)
 	if err != nil {
 		log.Fatal(err)
@@ -135,7 +137,10 @@ func main() {
 				log.Println("Error in getting campaign settings")
 				return
 			}
+			println(campaignSettings.CallbackUserOnlyMoveMinutes)
 			fmt.Println(campaignSettings)
+			functions.UserOnlyToAnyoneCallbacks(campaign.CampaignId, DBconn, campaignSettings)
+			//return //remove this
 			if campaignSettings.UseInternalDnc == "Y" || campaignSettings.UseCampaignDnc == "Y" {
 				functions.CheckHopperDNC(campaign.CampaignId, campaignSettings, dncNumbersCampaign, dncNumbers, DBconn)
 			}
@@ -143,21 +148,25 @@ func main() {
 
 			var calcHopperLevel float32
 			var hopperLevelNeeded int
+			if campaign.AgentCount < 5 {
+				campaign.AgentCount = campaign.AgentCount * 2
+			}
 			if campaignSettings.DialMethod == "RATIO" {
 				println("Ratio Dialing")
+
 				calcHopperLevel = float32(campaign.AgentCount) * float32(campaignSettings.AutoDialLevel) * (60.0 / float32(campaignSettings.DialTimeout))
 			} else {
 				calcHopperLevel = float32(campaign.AgentCount) * 1 * (60.0 / float32(campaignSettings.DialTimeout))
-				println("Predictive Dialing")
+				println("Normal Dialing")
 			}
 			println(calcHopperLevel)
 			hopperLevelNeeded = int(calcHopperLevel)
 			fmt.Printf("Hopper Level Needed: %d\n", hopperLevelNeeded)
 			fmt.Printf("Hopper Current Count: %d\n", hopperCurrentCount)
-
+			functions.UpdateCallbacks(campaign.CampaignId, DBconn)
+			functions.LoadCallbacks(campaign.CampaignId, DBconn)
 			if hopperCurrentCount < hopperLevelNeeded {
 				// Wait for DNC numbers to be loaded before proceeding
-
 				functions.RecycleLeads(campaignSettings, campaign, DBconn, hopperLevelNeeded, dncNumbers, dncNumbersCampaign)
 			}
 			println("Done")

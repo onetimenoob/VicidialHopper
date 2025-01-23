@@ -3,17 +3,18 @@ package models
 import "sync"
 
 type CampaignSettings struct {
-	LeadOrder          string
-	LeadFilterId       string
-	UseInternalDnc     string
-	UseCampaignDnc     string
-	DialMethod         string
-	DialTimeout        int
-	DialStatuses       []string
-	HopperLevel        int
-	CallCountLimit     int
-	LeadOrderSecondary string
-	AutoDialLevel      int
+	LeadOrder                   string
+	LeadFilterId                string
+	UseInternalDnc              string
+	UseCampaignDnc              string
+	DialMethod                  string
+	DialTimeout                 int
+	DialStatuses                []string
+	HopperLevel                 int
+	CallCountLimit              int
+	LeadOrderSecondary          string
+	AutoDialLevel               float32
+	CallbackUserOnlyMoveMinutes int
 }
 
 type LeadRecycleRule struct {
